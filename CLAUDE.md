@@ -14,7 +14,6 @@ ML emulators (Gaussian Processes and Neural Networks) are trained on the selecte
 
 ## How to Run
 
-```bash
 # Install dependencies (no requirements.txt)
 pip install jax jaxopt flax optax tinygp blackjax matplotlib corner numpy
 

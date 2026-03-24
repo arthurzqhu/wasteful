@@ -18,19 +18,34 @@ n_samples_R2 = 500
 num_steps = 2500
 UNCERTAINTY_MULTIPLIER = 3.0  # Inflate emulator uncertainty to prevent over-tightening
 
-# TRUE_THETA = jnp.array([1.6, 2.4, 1.0, 5.0])
-TRUE_THETA = jnp.array([3, 2, 16])
+# TRUE_THETA_PL = jnp.array([1.6, 2.4])
+# TRUE_THETA_HG = jnp.array([1.6, 2.4, 1.0, 5.0])
+TRUE_THETA_HM = jnp.array([3, 2, 16])
 # Bounds: [theta_0, theta_1, ..., x]
-bounds_R1 = [(0.1, 5.0), (0.1, 5.0), (1, 20), (0.1, 150.0)] 
-# bounds_R1 = [(0.1, 5.0), (0.1, 5.0), (0.1, 5.0), (0.1, 7.0), (0.1, 150.0)] 
+bounds_R1_HM = [(0.1, 5.0), (0.1, 5.0), (1, 20), (0.1, 150.0)] 
+# bounds_R1_HG = [(0.1, 5.0), (0.1, 5.0), (0.1, 5.0), (0.1, 7.0), (0.1, 150.0)] 
+# bounds_R1_PL = [(0.1, 5.0), (0.1, 5.0), (0, 10.0)] 
 # Derived automatically: midpoint of each parameter bound (excludes x, the last bound)
-initial_mcmc_position = jnp.array([(lo + hi) / 2.0 for lo, hi in bounds_R1[:-1]])
+initial_mcmc_position = jnp.array([(lo + hi) / 2.0 for lo, hi in bounds_R1_HM[:-1]])
 
 # -------------------------------------------------------------
 # 0. DEFINE SIMULATOR AND TRUTH
 def power_law(theta, x):
     """ y = theta_0 * x^theta_1 """
     return theta[:, 0] * jnp.power(x, theta[:, 1])
+
+def harmonic_mean_3t(theta, x):
+    # """ y = theta_0 * x^theta_1 """
+    # """ y = theta_0 * (x^theta_1/(x^theta_2 + theta_3)) """
+    """ vt = a * (v1**(-k) + v2**(-k))**(-1/k) """
+    a = theta[:, 0]
+    k = theta[:, 1]
+    v1 = jnp.power(x, 2/3.)
+    v2 = jnp.power(x, 1/3.) * jnp.power(theta[:, 2], 1/3.)
+    v3 = jnp.power(x, 1/6.) * jnp.power(theta[:, 3], 1/2.)
+    vt = a * (v1**(-k) + v2**(-k) + v3**(-k))**(-1/k)
+    return vt
+    # return theta[:, 0] * (jnp.power(x, theta[:, 1]) / (jnp.power(x, theta[:, 2]) + theta[:, 3]))
 
 def harmonic_mean(theta, x):
     # """ y = theta_0 * x^theta_1 """
@@ -136,7 +151,8 @@ def run_adaptive_discovery(name, model_type, key, bounds_R1, x_obs, y_obs, obs_e
                                    mcmc_prior_bounds, uncertainty_multiplier=current_mult, n_samples=n_samples)
             
         key, subkey = jax.random.split(key)
-        samples = run_mcmc_blackjax(lp_fn, initial_mcmc_position, 3000, subkey)
+        init_pos = jnp.array([(lo + hi) / 2.0 for lo, hi in mcmc_prior_bounds])
+        samples = run_mcmc_blackjax(lp_fn, init_pos, 3000, subkey)
         samples = np.array(samples[1000:])
         
         if is_posterior_wide_enough(samples, mcmc_prior_bounds, threshold=0.15):
@@ -341,12 +357,15 @@ def check_coverage(samples, truth, margin=0.025):
     covered = np.all((truth >= lower) & (truth <= upper))
     return covered, lower, upper
 
-def run_experiment():
+def run_experiment(sim_func=None, true_theta=None, bounds=None):
     key = jax.random.PRNGKey(42)
-    
-    SIM_FUNC = harmonic_mean
-    
-    mcmc_prior_bounds = bounds_R1[:-1]
+
+    # Use arguments if provided, otherwise fall back to module-level defaults (harmonic_mean)
+    SIM_FUNC = sim_func if sim_func is not None else harmonic_mean
+    TRUE_THETA = true_theta if true_theta is not None else TRUE_THETA_HM
+    BOUNDS = bounds if bounds is not None else bounds_R1_HM
+
+    mcmc_prior_bounds = BOUNDS[:-1]
     param_labels = [f"Parameter $\\theta_{i}$" for i in range(len(TRUE_THETA))]
 
     # -------------------------------------------------------------
@@ -354,17 +373,17 @@ def run_experiment():
     # -------------------------------------------------------------
     MODELS_TO_RUN = ["nn"]  # Options: "gp", "nn"
     STRATEGIES_TO_RUN = ["global", "buffered", "local"] # Options: "global", "buffered", "local"
-    
+
     print(f"\n--- PPE RUN CONFIGURATION ---")
     print(f"Models: {MODELS_TO_RUN}")
     print(f"Strategies: {STRATEGIES_TO_RUN}")
 
     # 1. GENERATE OBSERVATION DATA (Log-distributed)
-    x_obs = jnp.geomspace(bounds_R1[-1][0], bounds_R1[-1][1], 50)
+    x_obs = jnp.geomspace(BOUNDS[-1][0], BOUNDS[-1][1], 50)
     key, subkey = jax.random.split(key)
     # Use 5% relative observation error for stability across 8 orders of magnitude
     clean_y = true_process(x_obs, TRUE_THETA, SIM_FUNC)
-    obs_error = 0.05 * clean_y 
+    obs_error = 0.05 * clean_y
     y_obs = clean_y + obs_error * jax.random.normal(subkey, x_obs.shape)
 
     # -------------------------------------------------------------
@@ -374,23 +393,23 @@ def run_experiment():
     if "gp" in MODELS_TO_RUN:
         # GPs share the same Round 1 Discovery
         key, subkey = jax.random.split(key)
-        X_R1_GP, y_R1_GP, samples_R1_GP, dur_GP = run_adaptive_discovery("GP-Shared", "gp", subkey, bounds_R1, 
-                                                                  x_obs, y_obs, obs_error, TRUE_THETA, 
+        X_R1_GP, y_R1_GP, samples_R1_GP, dur_GP = run_adaptive_discovery("GP-Shared", "gp", subkey, BOUNDS,
+                                                                  x_obs, y_obs, obs_error, TRUE_THETA,
                                                                   mcmc_prior_bounds, SIM_FUNC)
-    
+
     X_R1_NN, y_R1_NN, samples_R1_NN, dur_NN = None, None, None, 0.0
     if "nn" in MODELS_TO_RUN:
         # NN runs independent Round 1 Discovery
         key, subkey = jax.random.split(key)
-        X_R1_NN, y_R1_NN, samples_R1_NN, dur_NN = run_adaptive_discovery("NN-Isolated", "nn", subkey, bounds_R1, 
-                                                                  x_obs, y_obs, obs_error, TRUE_THETA, 
+        X_R1_NN, y_R1_NN, samples_R1_NN, dur_NN = run_adaptive_discovery("NN-Isolated", "nn", subkey, BOUNDS,
+                                                                  x_obs, y_obs, obs_error, TRUE_THETA,
                                                                   mcmc_prior_bounds, SIM_FUNC)
 
     # -------------------------------------------------------------
     # 3. INITIALIZE INDEPENDENT SOLUTION PATHS
     # -------------------------------------------------------------
     solutions = []
-    
+
     # Define potential strategy combinations
     combos = []
     if "gp" in MODELS_TO_RUN:
@@ -399,10 +418,10 @@ def run_experiment():
     if "nn" in MODELS_TO_RUN:
         for s in STRATEGIES_TO_RUN:
             combos.append(("NN", s, "nn", X_R1_NN, y_R1_NN, samples_R1_NN))
-            
+
     for prefix, strat, mtype, X1, y1, s1 in combos:
-        solutions.append(IterativeSolution(f"{prefix} {strat.capitalize()}", strat, mtype, X1, y1, s1, 
-                          x_obs, y_obs, obs_error, bounds_R1, SIM_FUNC, TRUE_THETA))
+        solutions.append(IterativeSolution(f"{prefix} {strat.capitalize()}", strat, mtype, X1, y1, s1,
+                          x_obs, y_obs, obs_error, BOUNDS, SIM_FUNC, TRUE_THETA))
     
     # Attribute Discovery Time
     for sol in solutions:
@@ -486,7 +505,8 @@ def run_experiment():
     true_lp = get_true_logprob(x_obs, y_obs, obs_error, mcmc_prior_bounds, SIM_FUNC)
     print("Sampling True Simulator Baseline...")
     key, subkey = jax.random.split(key)
-    true_smp = np.array(run_mcmc_blackjax(true_lp, initial_mcmc_position, num_steps, subkey)[num_steps//2:])
+    init_pos = jnp.array([(lo + hi) / 2.0 for lo, hi in mcmc_prior_bounds])
+    true_smp = np.array(run_mcmc_blackjax(true_lp, init_pos, num_steps, subkey)[num_steps//2:])
     save_npz("True_Simulator", true_smp)
 
     # -------------------------------------------------------------

@@ -37,8 +37,10 @@ Both produce predictions with uncertainty estimates, which are used in the MCMC 
 
 ### Dependencies
 
+Only tested with Python 3.13.
+
 ```bash
-pip install jax jaxopt flax optax tinygp blackjax matplotlib corner numpy
+pip install jax jaxopt flax optax tinygp blackjax matplotlib corner numpy ipython
 ```
 
 ### Single parameterization (development/debugging)

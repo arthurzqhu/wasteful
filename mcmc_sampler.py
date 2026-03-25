@@ -24,7 +24,7 @@ def get_true_logprob(x_obs, y_obs, obs_error, prior_bounds, sim_func):
         return lp + jnp.clip(ll, a_min=-1e10, a_max=0.0)
     return logprob
 
-def get_gp_logprob(predict_fn, gp_params, X_train, y_train, X_mean, X_std, y_mean, y_std, x_obs, y_obs, obs_error, prior_bounds, uncertainty_multiplier=1.0, n_samples=1):
+def get_gp_logprob(predict_fn, gp_params, X_train, y_train, X_mean, X_std, y_mean, y_std, x_obs, y_obs, obs_error, prior_bounds, uncertainty_multiplier=1.0):
     def logprob(params):
         lp = logprior_fn(params, prior_bounds)
         theta_mat = jnp.tile(params, (len(x_obs), 1))
@@ -39,7 +39,7 @@ def get_gp_logprob(predict_fn, gp_params, X_train, y_train, X_mean, X_std, y_mea
         return lp + jnp.clip(ll, a_min=-1e10, a_max=0.0)
     return logprob
 
-def get_nn_logprob(predict_fn, nn_state_tuple, x_obs, y_obs, obs_error, prior_bounds, uncertainty_multiplier=1.0, n_samples=1):
+def get_nn_logprob(predict_fn, nn_state_tuple, x_obs, y_obs, obs_error, prior_bounds, uncertainty_multiplier=1.0):
     def logprob(params):
         lp = logprior_fn(params, prior_bounds)
         theta_mat = jnp.tile(params, (len(x_obs), 1))
@@ -53,8 +53,6 @@ def get_nn_logprob(predict_fn, nn_state_tuple, x_obs, y_obs, obs_error, prior_bo
         ll = -0.5 * jnp.sum((y_obs - y_pred)**2 / var + jnp.log(2 * jnp.pi * var))
         return lp + jnp.clip(ll, a_min=-1e10, a_max=0.0)
     return logprob
-
-import blackjax
 
 def run_mcmc_blackjax(logprob_fn, initial_position, num_steps, rng_key):
     warmup_key, sample_key = jax.random.split(rng_key)

@@ -124,7 +124,7 @@ def predict_gp_jax(X_new, params, X_train, y_train, X_mean, X_std, y_mean, y_std
     # Limit mu_log to prevent exp overflow (exp(88) is ~float64 limit)
     mu_log = jnp.clip(mu_log, -20.0, 20.0) 
     
-    # Transfrom back to linear space using Delta Method
+    # Transform back to linear space using Delta Method
     mu_linear = jnp.expm1(mu_log)
     std_linear = jnp.exp(mu_log) * jnp.sqrt(var_log)
     
@@ -222,8 +222,8 @@ def tune_and_train_nn_jax(X, y, key, num_searches=25):
         key, init_key = jax.random.split(key)
         state = create_train_state(init_key, lr, input_dim=X.shape[1], hidden_dims=h_dims)
 
-        best_trail_val_loss = jnp.inf
-        best_trail_state = state
+        best_trial_val_loss = jnp.inf
+        best_trial_state = state
         patience_counter = 0
 
         for epoch in range(fixed_epochs):
@@ -231,9 +231,9 @@ def tune_and_train_nn_jax(X, y, key, num_searches=25):
 
             if (epoch + 1) % check_interval == 0:
                 v_loss = val_step(state, X_val, y_val)
-                if v_loss < best_trail_val_loss:
-                    best_trail_val_loss = v_loss
-                    best_trail_state = state
+                if v_loss < best_trial_val_loss:
+                    best_trial_val_loss = v_loss
+                    best_trial_state = state
                     patience_counter = 0
                 else:
                     patience_counter += 1
@@ -241,10 +241,10 @@ def tune_and_train_nn_jax(X, y, key, num_searches=25):
                 if patience_counter >= patience_limit:
                     break
 
-        if best_trail_val_loss < best_val_loss:
-            best_val_loss = best_trail_val_loss
-            best_state = best_trail_state
-            best_config = {"hidden_dims": h_dims, "lr": lr, "epochs": epoch + 1, "val_nll": float(best_trail_val_loss)}
+        if best_trial_val_loss < best_val_loss:
+            best_val_loss = best_trial_val_loss
+            best_state = best_trial_state
+            best_config = {"hidden_dims": h_dims, "lr": lr, "epochs": epoch + 1, "val_nll": float(best_trial_val_loss)}
 
     print(f"Best Config Found: {best_config}")
     return best_state, X_mean, X_std, y_mean, y_std
